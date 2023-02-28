@@ -91,82 +91,19 @@ public:
     iterator end() noexcept {
         return data_.GetAddress() + size_;
     }
+    
     const_iterator begin() const noexcept {
         return data_.GetAddress();
     }
     const_iterator end() const noexcept {
         return data_.GetAddress() + size_;
     }
+    
     const_iterator cbegin() const noexcept {
         return data_.GetAddress();
     }
-
     const_iterator cend() const noexcept {
         return data_.GetAddress() + size_;
-    }
-
-    template <typename... Args>
-    iterator EmplaceReallocate(const_iterator pos, Args&&... args) {
-        size_t new_capacity = size_ ? (size_ << 1) : 1;
-        RawMemory<T> new_data{ new_capacity };
-        const size_t pos_id = std::distance(cbegin(), pos);
-        iterator new_data_pos = new_data.GetAddress() + pos_id;
-
-        new (new_data_pos) T(std::forward<Args>(args)...);
-        iterator throw_beg = new_data_pos;
-        iterator throw_end = new_data_pos + 1;
-
-        iterator ncpos = const_cast<iterator>(pos);
-        try {
-            UninitializedMoveOrCopyN(begin(), pos_id, new_data.GetAddress());
-            throw_beg = new_data.GetAddress();
-            UninitializedMoveOrCopyN(ncpos, size_ - pos_id, new_data_pos + 1);
-        }
-        catch (...) {
-            std::destroy(throw_beg, throw_end);
-            throw;
-        }
-
-        data_.Swap(new_data);
-        capacity_ = new_capacity;
-        std::destroy_n(new_data.GetAddress(), size_);
-        ++size_;
-        return new_data_pos;
-    }
-
-    //template <typename TT>
-    //void Forward(T& dst, TT&& src) {
-    //    dst = std::forward<TT>(src);
-    //}
-
-    template <typename Pred, typename... Args>
-    iterator EmplaceWithoutReallocate(const_iterator pos, Pred pos_setter, Args&&... args) {
-        iterator ncpos = const_cast<iterator>(pos);
-        if (ncpos != end()) {
-            iterator end_but_one = end() - 1;
-            std::uninitialized_move_n(end_but_one, 1, end());
-            std::move_backward(ncpos, end() - 1, end());
-
-            //if constexpr (sizeof...(Args) == 1) {
-            //    if constexpr (std::is_same_v<T, GetFirstTypeRemoveCVRef<Args...>>) {
-            //        Forward(*ncpos, std::forward<Args>(args)...);
-            //    }
-            //    else {
-            //        *ncpos = T(std::forward<Args>(args)...);
-            //    }
-            //}
-            //else {
-            pos_setter(*ncpos);
-            //* ncpos = T(std::forward<Args>(args)...);//не проходят 86/87 тесты, когда Args == T вызывается лишний конструктор
-            //}
-
-        }
-        else {
-            new (ncpos) T(std::forward<Args>(args)...);
-        }
-
-        ++size_;
-        return ncpos;
     }
 
     template <typename... Args>
@@ -189,7 +126,7 @@ public:
 
             //    //if constexpr (sizeof...(Args) == 1) {
             //    //    if constexpr (std::is_same_v<T, GetFirstTypeRemoveCVRef<Args...>>) {
-            //    //        Forward(*ncpos, std::forward<Args>(args)...);
+            //    //        Forward(*ncpos, std::forward<Args>(args)...);//теперь не проходятся тесты, при этом копирований/ перемещений меньше чем ожидает тренажер
             //    //    }
             //    //    else {
             //    //        *ncpos = T(std::forward<Args>(args)...);
@@ -218,7 +155,6 @@ public:
         --size_;
         return ncpos;
     }
-
 
     iterator Insert(const_iterator pos, const T& value) {
         if (size_ == capacity_) {
@@ -382,7 +318,6 @@ public:
         EmplaceBack(value);
     }
 
-
     void PushBack(T&& value) {
         EmplaceBack(std::move(value));
     }
@@ -392,8 +327,6 @@ public:
         auto des = data_.GetAddress() + size_;
         Destroy(des);
     }
-
-
 
     template <typename... Args>
     T& EmplaceBack(Args&&... args) {
@@ -413,7 +346,6 @@ public:
         ++size_;
         return *(data_.GetAddress() + (size_ - 1));*/
     }
-
 
 private:
     RawMemory<T> data_;
@@ -442,12 +374,71 @@ private:
     static void Destroy(T* buf) noexcept {
         buf->~T();
     }
+
+    template <typename... Args>
+    inline iterator EmplaceReallocate(const_iterator pos, Args&&... args) {
+        size_t new_capacity = size_ ? (size_ << 1) : 1;
+        RawMemory<T> new_data{ new_capacity };
+        const size_t pos_id = std::distance(cbegin(), pos);
+        iterator new_data_pos = new_data.GetAddress() + pos_id;
+
+        new (new_data_pos) T(std::forward<Args>(args)...);
+        iterator throw_beg = new_data_pos;
+        iterator throw_end = new_data_pos + 1;
+
+        iterator ncpos = const_cast<iterator>(pos);
+        try {
+            UninitializedMoveOrCopyN(begin(), pos_id, new_data.GetAddress());
+            throw_beg = new_data.GetAddress();
+            UninitializedMoveOrCopyN(ncpos, size_ - pos_id, new_data_pos + 1);
+        }
+        catch (...) {
+            std::destroy(throw_beg, throw_end);
+            throw;
+        }
+
+        data_.Swap(new_data);
+        capacity_ = new_capacity;
+        std::destroy_n(new_data.GetAddress(), size_);
+        ++size_;
+        return new_data_pos;
+    }
+
+    //template <typename TT> //нужен для решения через метапрограммирование
+    //void Forward(T& dst, TT&& src) {
+    //    dst = std::forward<TT>(src);
+    //}
+
+    template <typename Pred, typename... Args>
+    inline iterator EmplaceWithoutReallocate(const_iterator pos, Pred pos_setter, Args&&... args) {
+        iterator ncpos = const_cast<iterator>(pos);
+        if (ncpos != end()) {
+            iterator end_but_one = end() - 1;
+            std::uninitialized_move_n(end_but_one, 1, end());
+            std::move_backward(ncpos, end() - 1, end());
+
+            //if constexpr (sizeof...(Args) == 1) {
+            //    if constexpr (std::is_same_v<T, GetFirstTypeRemoveCVRef<Args...>>) {
+            //        Forward(*ncpos, std::forward<Args>(args)...);
+            //    }
+            //    else {
+            //        *ncpos = T(std::forward<Args>(args)...);
+            //    }
+            //}
+            //else {
+            pos_setter(*ncpos);
+            //* ncpos = T(std::forward<Args>(args)...);//не проходят 86/87 тесты, когда Args == T вызывается лишний конструктор
+            //}
+
+        }
+        else {
+            new (ncpos) T(std::forward<Args>(args)...);
+        }
+
+        ++size_;
+        return ncpos;
+    }
 };
-
-
-
-
-
 
 template <typename T>
 RawMemory<T>::RawMemory(size_t capacity)
@@ -521,3 +512,4 @@ template <typename T>
 void RawMemory<T>::Deallocate(T* buf) noexcept {
     operator delete(buf);
 }
+
