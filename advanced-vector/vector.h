@@ -5,7 +5,40 @@
 #include <utility>
 #include <memory>
 #include <stdexcept>
+#include <type_traits>
 
+
+#include <iostream>
+
+/* оставлю на будющее, с этим тесты не проходят, но материал полезный
+#if defined(__cpp_lib_remove_cvref) && (__cpp_lib_remove_cvref >= 201711L)
+#else
+namespace std {
+    template <typename T>
+    struct remove_cvref
+    {
+        using type = typename remove_cv<
+            typename remove_reference<T>::type
+        >::type;
+    };
+    template< class T >
+    using remove_cvref_t = typename remove_cvref<T>::type;
+}
+
+
+#endif
+
+template<typename U, typename... Ts>
+struct FirstType {
+    using type = U;
+};
+
+template <typename... Args>
+using GetFirstType = typename FirstType<Args...>::type;
+
+template <typename... Args>
+using GetFirstTypeRemoveCVRef = std::remove_cvref_t<GetFirstType<Args...>>;
+*/
 
 template <typename T>
 class RawMemory {
@@ -101,6 +134,11 @@ public:
         return new_data_pos;
     }
 
+    template <typename TT>
+    void Forward(T& dst, TT&& src) {
+        dst = std::forward<TT>(src);
+    }
+
     template <typename... Args>
     iterator Emplace(const_iterator pos, Args&&... args) {
         if (size_ == capacity_) {
@@ -113,7 +151,18 @@ public:
                 std::uninitialized_move_n(end_but_one, 1, end());
                 std::move_backward(ncpos, end() - 1, end());
 
-                *ncpos = T(std::forward<Args>(args)...);//не проходят 86/87 тесты, когда Args == T вызывается лишний конструктор
+                //if constexpr (sizeof...(Args) == 1) {
+                //    if constexpr (std::is_same_v<T, GetFirstTypeRemoveCVRef<Args...>>) {
+                //        Forward(*ncpos, std::forward<Args>(args)...);
+                //    }
+                //    else {
+                //        *ncpos = T(std::forward<Args>(args)...);
+                //    }
+                //}
+                //else {
+                * ncpos = T(std::forward<Args>(args)...);//не проходят 86/87 тесты, когда Args == T вызывается лишний конструктор
+                //}
+
             }
             else {
                 new (ncpos) T(std::forward<Args>(args)...);
@@ -133,6 +182,7 @@ public:
         --size_;
         return ncpos;
     }
+
 
     iterator Insert(const_iterator pos, const T& value) {
         if (size_ == capacity_) {
@@ -158,13 +208,18 @@ public:
         }
     }
 
-    iterator InsertNew(const_iterator pos, const T& value) {
+    /*iterator Insert(const_iterator pos, const T& value) {
         if (size_ == capacity_) {
+            return EmplaceReallocate(pos, value);
+        }
+        else if (pos != cend()) {
+            T temp(value);
+            return Emplace(pos, std::move(temp));
+        }
+        else {
             return Emplace(pos, value);
         }
-        T temp(value);
-        return Emplace(pos, std::move(temp));
-    }
+    }*/
 
     iterator Insert(const_iterator pos, T&& value) {
         return Emplace(pos, std::move(value));
@@ -285,7 +340,7 @@ public:
         EmplaceBack(std::move(value));
     }
 
-    void PopBack() /*noexcept*/ {
+    void PopBack() noexcept {
         --size_;
         auto des = data_.GetAddress() + size_;
         Destroy(des);
@@ -295,7 +350,8 @@ public:
 
     template <typename... Args>
     T& EmplaceBack(Args&&... args) {
-        if (size_ == capacity_) {
+        return *Emplace(cend(), std::forward<Args>(args)...);
+        /*if (size_ == capacity_) {
             size_t new_capacity = size_ ? (size_ << 1) : 1;
             RawMemory<T> new_data{ new_capacity };
             new (new_data.GetAddress() + size_) T(std::forward<Args>(args)...);
@@ -308,7 +364,7 @@ public:
             new (data_.GetAddress() + size_) T(std::forward<Args>(args)...);
         }
         ++size_;
-        return *(data_.GetAddress() + (size_ - 1));
+        return *(data_.GetAddress() + (size_ - 1));*/
     }
 
 
