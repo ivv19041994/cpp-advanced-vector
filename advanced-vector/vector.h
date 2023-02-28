@@ -113,8 +113,6 @@ public:
                 std::uninitialized_move_n(end_but_one, 1, end());
                 std::move_backward(ncpos, end() - 1, end());
 
-                
-
                 *ncpos = T(std::forward<Args>(args)...);//не проходят 86/87 тесты, когда Args == T вызывается лишний конструктор
             }
             else {
@@ -166,51 +164,6 @@ public:
         }
         T temp(value);
         return Emplace(pos, std::move(temp));
-    }
-
-    iterator InsertOld(const_iterator pos, T&& value) {
-        if (size_ == capacity_) {
-            size_t new_capacity = size_ ? (size_ << 1) : 1;
-            RawMemory<T> new_data{ new_capacity };
-            const size_t pos_id = std::distance(cbegin(), pos);
-            iterator new_data_pos = new_data.GetAddress() + pos_id;
-
-            new (new_data_pos) T(std::move(value));
-            iterator throw_beg = new_data_pos;
-            iterator throw_end = new_data_pos + 1;
-
-            iterator ncpos = const_cast<iterator>(pos);
-            try {
-                UninitializedMoveOrCopyN(begin(), pos_id, new_data.GetAddress());
-                throw_beg = new_data.GetAddress();
-                UninitializedMoveOrCopyN(ncpos, size_ - pos_id, new_data_pos + 1);
-            }
-            catch (...) {
-                std::destroy(throw_beg, throw_end);
-                throw;
-            }
-
-            data_.Swap(new_data);
-            capacity_ = new_capacity;
-            std::destroy_n(new_data.GetAddress(), size_);
-            ++size_;
-            return new_data_pos;
-        }
-        else {
-            iterator ncpos = const_cast<iterator>(pos);
-            if (ncpos != end()) {
-                iterator end_but_one = end() - 1;
-                std::uninitialized_move_n(end_but_one, 1, end());
-                std::move_backward(ncpos, end() - 1, end());
-                *ncpos = T(std::move(value));
-            }
-            else {
-                new (ncpos) T(std::move(value));
-            }
-
-            ++size_;
-            return ncpos;
-        }
     }
 
     iterator Insert(const_iterator pos, T&& value) {
@@ -323,20 +276,10 @@ public:
         size_ = new_size;
     }
 
-    void PushBackOld(const T& value) {
-        PushBackOld([&value](T* ptr) {
-            new (ptr) T(value);
-            });
-    }
     void PushBack(const T& value) {
         EmplaceBack(value);
     }
 
-    void PushBackOld(T&& value) {
-        PushBackOld([&value](T* ptr) {
-            new (ptr) T(std::move(value));
-            });
-    }
 
     void PushBack(T&& value) {
         EmplaceBack(std::move(value));
@@ -348,13 +291,6 @@ public:
         Destroy(des);
     }
 
-    template <typename... Args>
-    T& EmplaceBackOld(Args&&... args) {
-        PushBackOld([&args...](T* ptr) {
-            new (ptr) T(std::forward<Args>(args)...);
-            });
-        return *(data_.GetAddress() + (size_ - 1));
-    }
 
 
     template <typename... Args>
@@ -402,23 +338,6 @@ private:
     // Вызывает деструктор объекта по адресу buf
     static void Destroy(T* buf) noexcept {
         buf->~T();
-    }
-
-    template <typename MoveOrCopy>
-    inline void PushBackOld(MoveOrCopy setter) {
-        if (size_ == capacity_) {
-            size_t new_capacity = size_ ? (size_ << 1) : 1;
-            RawMemory<T> new_data{ new_capacity };
-            setter(new_data.GetAddress() + size_);
-            UninitializedMoveOrCopyN(data_.GetAddress(), size_, new_data.GetAddress());
-            data_.Swap(new_data);
-            capacity_ = new_capacity;
-            std::destroy_n(new_data.GetAddress(), size_);
-        }
-        else {
-            setter(data_.GetAddress() + size_);
-        }
-        ++size_;
     }
 };
 
