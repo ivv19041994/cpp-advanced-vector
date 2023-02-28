@@ -134,9 +134,39 @@ public:
         return new_data_pos;
     }
 
-    template <typename TT>
-    void Forward(T& dst, TT&& src) {
-        dst = std::forward<TT>(src);
+    //template <typename TT>
+    //void Forward(T& dst, TT&& src) {
+    //    dst = std::forward<TT>(src);
+    //}
+
+    template <typename Pred, typename... Args>
+    iterator EmplaceWithoutReallocate(const_iterator pos, Pred pos_setter, Args&&... args) {
+        iterator ncpos = const_cast<iterator>(pos);
+        if (ncpos != end()) {
+            iterator end_but_one = end() - 1;
+            std::uninitialized_move_n(end_but_one, 1, end());
+            std::move_backward(ncpos, end() - 1, end());
+
+            //if constexpr (sizeof...(Args) == 1) {
+            //    if constexpr (std::is_same_v<T, GetFirstTypeRemoveCVRef<Args...>>) {
+            //        Forward(*ncpos, std::forward<Args>(args)...);
+            //    }
+            //    else {
+            //        *ncpos = T(std::forward<Args>(args)...);
+            //    }
+            //}
+            //else {
+            pos_setter(*ncpos);
+            //* ncpos = T(std::forward<Args>(args)...);//не проходят 86/87 тесты, когда Args == T вызывается лишний конструктор
+            //}
+
+        }
+        else {
+            new (ncpos) T(std::forward<Args>(args)...);
+        }
+
+        ++size_;
+        return ncpos;
     }
 
     template <typename... Args>
@@ -145,31 +175,37 @@ public:
             return EmplaceReallocate(pos, std::forward<Args>(args)...);
         }
         else {
-            iterator ncpos = const_cast<iterator>(pos);
-            if (ncpos != end()) {
-                iterator end_but_one = end() - 1;
-                std::uninitialized_move_n(end_but_one, 1, end());
-                std::move_backward(ncpos, end() - 1, end());
+            return EmplaceWithoutReallocate(pos,
+                [&args...](T& dst) {
+                    dst = T(std::forward<Args>(args)...);
+                },
+                std::forward<Args>(args)...
+            );
+            //iterator ncpos = const_cast<iterator>(pos);
+            //if (ncpos != end()) {
+            //    iterator end_but_one = end() - 1;
+            //    std::uninitialized_move_n(end_but_one, 1, end());
+            //    std::move_backward(ncpos, end() - 1, end());
 
-                //if constexpr (sizeof...(Args) == 1) {
-                //    if constexpr (std::is_same_v<T, GetFirstTypeRemoveCVRef<Args...>>) {
-                //        Forward(*ncpos, std::forward<Args>(args)...);
-                //    }
-                //    else {
-                //        *ncpos = T(std::forward<Args>(args)...);
-                //    }
-                //}
-                //else {
-                * ncpos = T(std::forward<Args>(args)...);//не проходят 86/87 тесты, когда Args == T вызывается лишний конструктор
-                //}
+            //    //if constexpr (sizeof...(Args) == 1) {
+            //    //    if constexpr (std::is_same_v<T, GetFirstTypeRemoveCVRef<Args...>>) {
+            //    //        Forward(*ncpos, std::forward<Args>(args)...);
+            //    //    }
+            //    //    else {
+            //    //        *ncpos = T(std::forward<Args>(args)...);
+            //    //    }
+            //    //}
+            //    //else {
+            //    * ncpos = T(std::forward<Args>(args)...);//не проходят 86/87 тесты, когда Args == T вызывается лишний конструктор
+            //    //}
 
-            }
-            else {
-                new (ncpos) T(std::forward<Args>(args)...);
-            }
+            //}
+            //else {
+            //    new (ncpos) T(std::forward<Args>(args)...);
+            //}
 
-            ++size_;
-            return ncpos;
+            //++size_;
+            //return ncpos;
         }
     }
 
@@ -189,22 +225,33 @@ public:
             return EmplaceReallocate(pos, value);
         }
         else {
+            T temp(value);
+            return EmplaceWithoutReallocate(pos,
+                [&temp](T& dst) {
+                    dst = std::move(temp);
+                },
+                value
+            );
 
-            iterator ncpos = const_cast<iterator>(pos);
-            if (ncpos != end()) {
-                T temp(value);
-                iterator end_but_one = end() - 1;
-                std::uninitialized_move_n(end_but_one, 1, end());
-                std::move_backward(ncpos, end() - 1, end());
-                *ncpos = std::move(temp);//проблема 86/87 теста в этой строке в Emplace тут *ncpos = T(std::forward<Args>(args)...);
-                //вызывается лишний конструктор
-            }
-            else {
-                new (ncpos) T(value);
-            }
+            ////допущено не большое дублирование кода, так как не смог решить проблему 86/87 тестов
+            //iterator ncpos = const_cast<iterator>(pos);
 
-            ++size_;
-            return ncpos;
+
+
+            //if (ncpos != end()) {
+            //    T temp(value);
+            //    iterator end_but_one = end() - 1;
+            //    std::uninitialized_move_n(end_but_one, 1, end());
+            //    std::move_backward(ncpos, end() - 1, end());
+            //    *ncpos = std::move(temp);//проблема 86/87 теста в этой строке в Emplace тут *ncpos = T(std::forward<Args>(args)...);
+            //    //вызывается лишний конструктор
+            //}
+            //else {
+            //    new (ncpos) T(value);
+            //}
+
+            //++size_;
+            //return ncpos;
         }
     }
 
@@ -350,7 +397,7 @@ public:
 
     template <typename... Args>
     T& EmplaceBack(Args&&... args) {
-        return *Emplace(cend(), std::forward<Args>(args)...);
+        return *Emplace(cend(), std::forward<Args>(args)...);//EmplaceBack частный случай Emplace
         /*if (size_ == capacity_) {
             size_t new_capacity = size_ ? (size_ << 1) : 1;
             RawMemory<T> new_data{ new_capacity };
